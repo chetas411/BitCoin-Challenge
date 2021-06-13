@@ -3,8 +3,10 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <stack>
 #include <unordered_map>
 #include <unordered_set>
+#include <algorithm>
 #include "Transaction.h"
 using namespace std;
 const int maxWeight = 4000000;
@@ -78,6 +80,15 @@ vector<Transaction> transactionFileParser(string fileName, int numberOfEntries){
     return data;
 }
 
+void writeTransactionsToFile(vector<string> data, string fileName){
+    fstream fout;
+    fout.open(fileName, ios::app | ios::out);
+    for(auto s : data){
+        fout<<s<<endl;
+    }
+    fout.close();
+}
+
 // for sorting the transactions 
 void sortTransactions(vector<Transaction> &dataFee, vector<Transaction> &dataWeight){
     int n = dataFee.size();
@@ -101,16 +112,84 @@ void sortTransactions(vector<Transaction> &dataFee, vector<Transaction> &dataWei
     }
 }
 
+vector<string> getBlockData(vector<Transaction> data, int &totalFees){
+    vector<string> finalBlock;
+    unordered_set<string> included;
+    int currentWeight = 0;
+    unordered_map<string,int> mapId;
+    for(int i=0;i<data.size();i++){
+        mapId[data[i].getID()] = i;
+    }
+    for(int i=0;i<data.size();i++){
+        if(currentWeight > maxWeight){
+            break;
+        }
+        if(included.find(data[i].getID())==included.end()){
+            if(data[i].getParents().size()==0){
+                currentWeight += data[i].getWeight();
+                if(currentWeight <= maxWeight){
+                    finalBlock.push_back(data[i].getID());
+                    included.insert(data[i].getID());
+                    totalFees += data[i].getFee();
+                }
+            }
+            else{
+                stack<string> pendingTransactions;
+                pendingTransactions.push(data[i].getID());
+                while(!pendingTransactions.empty()){
+                    if(currentWeight > maxWeight){
+                        break;
+                    }
+                    string curr = pendingTransactions.top();
+                    int k = mapId[curr];
+                    if(data[k].getParents().size()==0){
+                        pendingTransactions.pop();
+                        currentWeight += data[k].getWeight();
+                        if(currentWeight <= maxWeight){
+                            finalBlock.push_back(data[k].getID());
+                            included.insert(data[k].getID());
+                            totalFees += data[k].getFee();
+                        }
+                    }
+                    else{
+                        bool flag = true;
+                        for(int j=0;j<data[k].getParents().size();++j){
+                            if(included.find(data[k].getParents()[j])==included.end()){
+                                pendingTransactions.push(data[k].getParents()[j]);
+                                flag = false;
+                            }
+                        }
+                        if(flag){
+                            pendingTransactions.pop();
+                            currentWeight += data[k].getWeight();
+                            if(currentWeight <= maxWeight){
+                                finalBlock.push_back(data[k].getID());
+                                included.insert(data[k].getID());
+                                totalFees += data[k].getFee();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // cout<<currentWeight<<" "<<totalFees<<endl;
+    return finalBlock;
+}
+
+
+
 int main(){
     vector<Transaction> dataSortedForFee = transactionFileParser("mempool.csv", entries);
     vector<Transaction> dataSortedForWeight = dataSortedForFee;
     sortTransactions(dataSortedForFee,dataSortedForWeight);
-    for(int i=0;i<dataSortedForFee.size();i++){
-        cout<<i+1<<"-> ";
-        cout<<"Sorted Fee :"<<dataSortedForFee[i].getFee()<<" "<<dataSortedForFee[i].getWeight()<<"  ";
-        cout<<"Sorted Weight :"<<dataSortedForWeight[i].getFee()<<" "<<dataSortedForWeight[i].getWeight()<<"  ";
-        cout<<endl;
-
+    int totalFeeOne = 0, totalFeeTwo = 0;
+    vector<string> blockforFee = getBlockData(dataSortedForFee,totalFeeOne);
+    vector<string> blockforWeight = getBlockData(dataSortedForWeight, totalFeeTwo);
+    if(totalFeeOne > totalFeeTwo){
+        writeTransactionsToFile(blockforFee,"block.txt");
     }
-    // cout<<data.size()<<endl;
+    else{
+        writeTransactionsToFile(blockforWeight,"block.txt");
+    }
 }
